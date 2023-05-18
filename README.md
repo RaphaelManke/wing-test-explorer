@@ -1,21 +1,4 @@
-# Test Provider Sample
-
-This sample demonstrates usage of the Test Provider API. It looks for tests as additions in `.md` files, with heading as groups, for example:
-
-```
-# Easy Math
-
-2 + 2 = 4 // this test will pass
-2 + 2 = 5 // this test will fail
-
-# Harder Math
-
-230230 + 5819123 = 6049353
-```
-
-## VS Code API
-
-todo
+# Wing Test Provider Sample
 
 ## Running the Sample
 

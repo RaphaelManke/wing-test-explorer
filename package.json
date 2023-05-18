@@ -20,6 +20,28 @@
 	"activationEvents": [
 		"workspaceContains:*.md"
 	],
+	"contributes": {
+		"configuration": {
+			"title": "Wing Test Explorer",
+			"properties": {
+				"wing.test.logLevel": {
+					"type": "string",
+					"enum": [
+						"info",
+						"verbose",
+						"debug"
+					],
+					"default": "info",
+					"description": "The log level used by the Wing Test Explorer."
+				},
+				"wing.test.fileEnding": {
+					"type": "string",
+					"default": ".w",
+					"description": "The file ending used by the Wing Test Explorer to detect test files."
+				}
+			}
+		}
+	},
 	"main": "./out/extension.js",
 	"scripts": {
 		"vscode:prepublish": "npm run compile",

@@ -30,3 +30,4 @@ test "bucket bar" {
   assert(objs.at(4) == "foo/bar/baz");
 }
  
+ 

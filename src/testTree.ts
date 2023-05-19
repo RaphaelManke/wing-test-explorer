@@ -160,49 +160,37 @@ const cache = new Map<string, string>();
 export class TestCase {
   constructor(public generation: number) {}
 
-  async run(item: vscode.TestItem, options: vscode.TestRun): Promise<void> {
-    const start = Date.now();
-    console.log(generationCounter);
-    const task: vscode.Task = {
-      name: "test",
-      execution: new vscode.ShellExecution('echo "test"'),
-      source: "wing test",
-      definition: {
-        type: "shell",
-      },
-      isBackground: false,
-      presentationOptions: {},
-      problemMatchers: [],
-      runOptions: {},
-      scope: vscode.TaskScope.Workspace,
-    };
+  static async run(
+    testItem: vscode.TestItem,
+    testRun: vscode.TestRun
+  ): Promise<void> {
     const result = { success: "", error: "" };
     const exe = await executeShellCommandPromise(
-      `wing test ${item.uri!.fsPath}`
+      `wing test ${testItem.uri!.fsPath}`
     );
     if (exe.success) {
       result.success = exe.message;
     } else {
-      result.error = extractFailureMessage(exe.error) || "Unknown error";
+      result.error = extractFailureMessage(exe.error) || exe.error;
       console.log(parseInput(exe.error));
     }
 
-    const duration = Date.now() - start;
+    const duration = exe.duration;
 
     if (exe.success) {
-      options.passed(item, duration);
+      testRun.passed(testItem, duration);
     } else {
       const message = vscode.TestMessage.diff(
-        `Expected ${item.label}`,
+        `Expected ${testItem.label}`,
         String("Assertion matches"),
         String(result.error)
       );
-      message.location = new vscode.Location(item.uri!, item.range!);
-      const errorPerTEst = parseInput(exe.error);
-      if (errorPerTEst[item.label] === "fail") {
-        options.failed(item, message, duration);
+      message.location = new vscode.Location(testItem.uri!, testItem.range!);
+      const errorPerTest = parseInput(exe.error);
+      if (errorPerTest[testItem.label] === "pass") {
+        testRun.passed(testItem, duration);
       } else {
-        options.passed(item, duration);
+        testRun.failed(testItem, message, duration);
       }
     }
   }
@@ -215,15 +203,20 @@ export class TestCase {
 const executeShellCommandPromise = (
   command: string
 ): Promise<
-  { success: true; message: string } | { success: false; error: string }
+  | { success: true; message: string; duration: number }
+  | { success: false; error: string; duration: number }
 > => {
   return new Promise((resolve, reject) => {
+    const start = Date.now();
+
     exec(command, (error, stdout, stderr) => {
       if (error) {
         console.warn(error);
-        resolve({ success: false, error: stderr ? stderr : stdout });
+        const duration = Date.now() - start;
+        resolve({ success: false, error: stderr ? stderr : stdout, duration });
       }
-      resolve({ success: true, message: stdout ? stdout : stderr });
+      const duration = Date.now() - start;
+      resolve({ success: true, message: stdout ? stdout : stderr, duration });
     });
   });
 };

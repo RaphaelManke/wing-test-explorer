@@ -4,7 +4,6 @@ import {
   TestCase,
   wingFileFromUri,
   WingFile,
-  wingFileFromTextDocument,
 } from "./testTree";
 import { testData as testFileStore } from "./testDataStore";
 
@@ -51,7 +50,7 @@ export async function activate(context: vscode.ExtensionContext) {
    * A refresh run scans the workspace for tests again.
    */
   testController.refreshHandler = async () => {
-    logger.debug("refreshHandler triggered");
+    logger.info("refreshHandler triggered");
     const workspacesTestFilePattern =
       getTestFilePatternForWorkspaces(filePattern);
     logger.debug(
@@ -70,7 +69,23 @@ export async function activate(context: vscode.ExtensionContext) {
   };
 
   /**
-   * This is the handler for the "Run" button in the test explorer or test file.
+   * Handler that is triggered when the user clicks the expand button in the test explorer.
+   */
+
+  testController.resolveHandler = async (item) => {
+    if (!item) {
+      logger.debug("resolveHandler triggered without item");
+      return;
+    }
+
+    const data = testFileStore.get(item);
+    if (data instanceof WingFile) {
+      await data.updateFromDisk(item, testController);
+    }
+  };
+
+  /**
+   * Handler for the "Run" button in the test explorer or test file.
    */
   testController.createRunProfile(
     "Run Tests",
@@ -83,58 +98,19 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   /**
-   * This is the handler that is triggered when the user clicks the expand button in the test explorer.
+   * Initial test discovery.
    */
-
-  testController.resolveHandler = async (item) => {
-    if (!item) {
-      context.subscriptions.push(
-        ...startWatchingWorkspace(
-          testController,
-          fileChangedEmitter,
-          filePattern
-        )
-      );
-      return;
-    }
-
-    const data = testFileStore.get(item);
-    if (data instanceof WingFile) {
-      await data.updateFromDisk(item, testController);
-    }
-  };
-
-  const matchingFiles = await vscode.workspace.findFiles(filePattern);
-  const existingWingFiles = matchingFiles.map((file) => wingFileFromUri(file));
-  for (const wingFile of existingWingFiles) {
-    createTestItemFromFile(testController, wingFile);
-  }
-
   context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument((possibleWingFile) => {
-      const wingFile = wingFileFromTextDocument(possibleWingFile, fileEnding);
-      if (wingFile) {
-        createTestItemFromFile(testController, wingFile);
-      }
-    }),
-    vscode.workspace.onDidChangeTextDocument((possibleWingFile) => {
-      const wingFile = wingFileFromTextDocument(
-        possibleWingFile.document,
-        fileEnding
-      );
-      if (wingFile) {
-        createTestItemFromFile(testController, wingFile);
-      }
-    })
+    ...startWatchingWorkspace(testController, fileChangedEmitter, filePattern)
   );
 }
 
 const startTestRun = (
   request: vscode.TestRunRequest,
-  ctrl: vscode.TestController
+  testController: vscode.TestController
 ) => {
-  const queue: { test: vscode.TestItem; data: TestCase }[] = [];
-  const run = ctrl.createTestRun(request);
+  const queue: vscode.TestItem[] = [];
+  const testRun = testController.createTestRun(request);
   // map of file uris to statements on each line:
   const coveredLines = new Map<
     /* file uri */ string,
@@ -149,8 +125,8 @@ const startTestRun = (
 
       const data = testFileStore.get(test);
       if (data instanceof TestCase) {
-        run.enqueued(test);
-        queue.push({ test, data });
+        testRun.enqueued(test);
+        queue.push(test);
       } else {
         if (data instanceof WingFile && !data.didResolve) {
           // await data.updateFromDisk(test, testC);
@@ -159,37 +135,17 @@ const startTestRun = (
         const testItems = gatherTestItems(test.children);
         await discoverTests(testItems);
       }
-
-      if (test.uri && !coveredLines.has(test.uri.toString())) {
-        try {
-          const lines = (await getContentFromFilesystem(test.uri)).split("\n");
-          coveredLines.set(
-            test.uri.toString(),
-            lines.map((lineText, lineNo) =>
-              lineText.trim().length
-                ? new vscode.StatementCoverage(
-                    0,
-                    new vscode.Position(lineNo, 0)
-                    // eslint-disable-next-line no-mixed-spaces-and-tabs
-                  )
-                : undefined
-            )
-          );
-        } catch {
-          // ignored
-        }
-      }
     }
   };
 
   const runTestQueue = async () => {
-    const exec = async (test: vscode.TestItem, data: TestCase) => {
-      run.appendOutput(`Running ${test.id}\r\n`);
-      if (run.token.isCancellationRequested) {
-        run.skipped(test);
+    const exec = async (test: vscode.TestItem) => {
+      testRun.appendOutput(`Running ${test.id}\r\n`);
+      if (testRun.token.isCancellationRequested) {
+        testRun.skipped(test);
       } else {
-        run.started(test);
-        await data.run(test, run);
+        testRun.started(test);
+        await TestCase.run(test, testRun);
       }
 
       const lineNo = test.range!.start.line;
@@ -198,14 +154,14 @@ const startTestRun = (
         fileCoverage[lineNo]!.executionCount++;
       }
 
-      run.appendOutput(`Completed ${test.id}\r\n`);
+      testRun.appendOutput(`Completed ${test.id}\r\n`);
     };
-    await Promise.all(queue.map(({ test, data }) => exec(test, data)));
+    await Promise.all(queue.map((testItem) => exec(testItem)));
 
-    run.end();
+    testRun.end();
   };
 
-  discoverTests(request.include ?? gatherTestItems(ctrl.items)).then(
+  discoverTests(request.include ?? gatherTestItems(testController.items)).then(
     runTestQueue
   );
 };
@@ -213,19 +169,19 @@ const startTestRun = (
 const runHandler = (
   request: vscode.TestRunRequest2,
   cancellation: vscode.CancellationToken,
-  ctrl: vscode.TestController,
+  testController: vscode.TestController,
   fileChangedEmitter: vscode.EventEmitter<vscode.Uri>
 ) => {
   if (!request.continuous) {
-    return startTestRun(request, ctrl);
+    return startTestRun(request, testController);
   }
 
   const l = fileChangedEmitter.event(async (uri) => {
     const wingFile = wingFileFromUri(uri);
-    const { file } = await createTestItemFromFile(ctrl, wingFile);
+    const { file } = await createTestItemFromFile(testController, wingFile);
     startTestRun(
       new vscode.TestRunRequest2([file], undefined, request.profile, true),
-      ctrl
+      testController
     );
   });
   cancellation.onCancellationRequested(() => l.dispose());
@@ -242,8 +198,14 @@ const createTestItemFromFile = async (
   );
   await wingFile.updateFromDisk(vscodeTestItem, testController);
 
+  const workspace = vscode.workspace.getWorkspaceFolder(wingFile.uri);
   if (wingFile.hasTests) {
-    testController.items.add(vscodeTestItem);
+    const parent = testController.items.get(workspace!.uri.toString());
+    if (parent) {
+      parent.children.add(vscodeTestItem);
+    } else {
+      testController.items.add(vscodeTestItem);
+    }
   } else {
     testController.items.delete(vscodeTestItem.id);
   }
@@ -297,10 +259,23 @@ const startWatchingWorkspace = (
   const testFilePatternForWorkspaces =
     getTestFilePatternForWorkspaces(filePattern);
   const fileWatchers: vscode.FileSystemWatcher[] = [];
-  for (const { pattern } of testFilePatternForWorkspaces) {
+  for (const { workspaceFolder, pattern } of testFilePatternForWorkspaces) {
+    const workspaceTestItem = controller.createTestItem(
+      workspaceFolder.uri.toString(),
+      workspaceFolder.name,
+      workspaceFolder.uri
+    );
+    workspaceTestItem.canResolveChildren = true;
+    controller.items.add(workspaceTestItem);
+
     findTestFilesInWorkspace(controller, pattern);
 
-    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      pattern,
+      false,
+      false,
+      false
+    );
 
     watcher.onDidCreate((uri) => {
       const wingFile = wingFileFromUri(uri);
@@ -316,8 +291,17 @@ const startWatchingWorkspace = (
       }
       fileChangedEmitter.fire(uri);
     });
-    watcher.onDidDelete((uri) => controller.items.delete(uri.toString()));
 
+    watcher.onDidDelete((uri) => {
+      const workspaceItems = controller.items.get(
+        workspaceFolder.uri.toString()
+      );
+      if (!workspaceItems) {
+        controller.items.delete(uri.toString());
+      } else {
+        workspaceItems.children.delete(uri.toString());
+      }
+    });
     fileWatchers.push(watcher);
   }
   return fileWatchers;

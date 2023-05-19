@@ -1,12 +1,12 @@
 {
-	"name": "test-provider-sample",
-	"displayName": "test-provider-sample",
-	"description": "Sample showing how to use the test APIs",
+	"name": "wing-test-provider",
+	"displayName": "Wing Test Provider",
+	"description": "Show Wing tests in the Test Explorer.",
 	"version": "0.0.1",
-	"publisher": "vscode-samples",
+	"publisher": "raphaelmanke",
 	"private": true,
 	"license": "MIT",
-	"repository": "https://github.com/Microsoft/vscode-extension-samples",
+	"repository": "https://github.com/RaphaelManke/wing-test-explorer",
 	"enabledApiProposals": [
 		"testCoverage",
 		"testContinuousRun"
@@ -15,14 +15,16 @@
 		"vscode": "^1.68.0"
 	},
 	"categories": [
-		"Other"
+		"Other",
+		"Testing"
 	],
 	"activationEvents": [
-		"workspaceContains:*.md"
+		"workspaceContains:*.w",
+		"onLanguage:wing"
 	],
 	"contributes": {
 		"configuration": {
-			"title": "Wing Test Explorer",
+			"title": "Wing Test Provider",
 			"properties": {
 				"wing.test.logLevel": {
 					"type": "string",

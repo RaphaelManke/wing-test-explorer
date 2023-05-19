@@ -1,0 +1,13 @@
+# !src
+# !out
+# !package.json
+# !README.md
+
+sample
+sample2
+**/*.ts
+**/*.d.ts
+**/*.json
+.vscode
+.gitignore
+extr
